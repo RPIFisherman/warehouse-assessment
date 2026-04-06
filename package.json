@@ -1,0 +1,13 @@
+{
+  "name": "warehouse-assessment",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c blue,green \"cd backend && npx tsx watch src/index.ts\" \"cd frontend && npx vite\"",
+    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "build": "cd frontend && npx vite build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}
