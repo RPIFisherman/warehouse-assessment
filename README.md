@@ -19,6 +19,22 @@ Open `http://localhost:5173` in Chrome (use DevTools mobile viewport for the pho
 
 The backend runs on port 3001, the frontend on port 5173. The frontend dev server proxies `/api` and `/uploads` to the backend.
 
+### Optional: Expose via Tunnel (Cloudflare, ngrok, etc.)
+
+If you want to access the dev server from a public hostname (e.g. so a colleague can reach it from their phone over the internet), create a `.env.local` file in **both** `frontend/` and `backend/` with your hostname. These files are gitignored so your personal hostnames never get committed.
+
+```bash
+# frontend/.env.local
+ALLOWED_HOSTS=my-tunnel.trycloudflare.com,staging.example.com
+
+# backend/.env.local
+ALLOWED_ORIGINS=https://my-tunnel.trycloudflare.com,https://staging.example.com
+```
+
+Both files support comma-separated lists. Copy from the provided `.env.example` templates in each directory as a starting point. Restart `npm run dev` after editing.
+
+Without a `.env.local`, the dev server only accepts `localhost` — safe by default.
+
 ## Tech Stack
 
 | Layer | Technology |
@@ -237,9 +253,9 @@ Photos are stored in `backend/uploads/` and persist independently.
 
 For sharing the demo via a public URL (e.g. Cloudflare Tunnel, ngrok, or your own server):
 
-1. Add the public hostname to `frontend/vite.config.ts` under `server.allowedHosts`
-2. Add the public hostname to the CORS whitelist in `backend/src/index.ts`
-3. Restrict access with an identity-aware proxy (e.g. Cloudflare Access) if sharing externally
+1. Configure your hostname via `.env.local` files (see [Optional: Expose via Tunnel](#optional-expose-via-tunnel-cloudflare-ngrok-etc) above) — no source code edits required.
+2. Restrict access with an identity-aware proxy (e.g. Cloudflare Access) if sharing externally.
+3. For a proper production build, run `npm run build` in `frontend/` and serve the static assets alongside the Express backend.
 
 ## License
 

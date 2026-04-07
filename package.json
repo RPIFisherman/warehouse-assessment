@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently -n backend,frontend -c blue,green \"cd backend && npx tsx watch src/index.ts\" \"cd frontend && npx vite\"",
+    "dev": "concurrently -n backend,frontend -c blue,green \"cd backend && npm run dev\" \"cd frontend && npm run dev\"",
     "install:all": "cd backend && npm install && cd ../frontend && npm install",
     "build": "cd frontend && npx vite build"
   },

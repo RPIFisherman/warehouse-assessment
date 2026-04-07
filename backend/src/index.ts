@@ -17,12 +17,20 @@ if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 initDB();
 
 const app = express();
-// Add your public hostname(s) here if exposing via a tunnel/proxy
+
+// Comma-separated list of extra allowed origins for CORS. Set this in a
+// local .env file (gitignored) if exposing via a tunnel/proxy:
+//   ALLOWED_ORIGINS=https://my-tunnel.trycloudflare.com
+const extraOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+
 app.use(cors({
   origin: [
     'http://localhost:5173',
     'http://localhost:4173',
-    // 'https://your-public-hostname.example.com',
+    ...extraOrigins,
   ],
 }));
 app.use(express.json());
