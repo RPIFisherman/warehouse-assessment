@@ -17,11 +17,12 @@ if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 initDB();
 
 const app = express();
+// Add your public hostname(s) here if exposing via a tunnel/proxy
 app.use(cors({
   origin: [
     'http://localhost:5173',
     'http://localhost:4173',
-    'https://warehouse-assessment.yuyang2001.qzz.io',
+    // 'https://your-public-hostname.example.com',
   ],
 }));
 app.use(express.json());

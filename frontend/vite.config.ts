@@ -8,7 +8,8 @@ export default defineConfig({
     alias: { '@': path.resolve(__dirname, 'src') }
   },
   server: {
-    allowedHosts: ['warehouse-assessment.yuyang2001.qzz.io'],
+    // Add your public hostname here if exposing via a tunnel/proxy
+    // allowedHosts: ['your-public-hostname.example.com'],
     proxy: {
       '/api': 'http://localhost:3001',
       '/uploads': 'http://localhost:3001'

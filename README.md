@@ -1,12 +1,13 @@
 # Warehouse Assessment
 
-A mobile-first, tap-driven warehouse assessment demo. Built as a standalone proof-of-concept showing how facility inspections can be reduced from a 30-minute desktop form to a 5-minute mobile walkthrough where everything defaults to "OK" and only exceptions require interaction.
+A mobile-first, tap-driven warehouse assessment demo. A self-contained proof-of-concept showing how facility inspections can be reduced from a long desktop form to a sub-5-minute mobile walkthrough where everything defaults to "OK" and only exceptions require interaction.
 
-This is a self-contained reference implementation. The intended consumer is the WMS team — read the [PRD](./PRD.md) for the full spec and acceptance criteria before integrating into the production WMS.
+This repository is a reference implementation intended to show how a default-OK, zone-guided assessment app can work on a phone. The demo app is fully functional standalone — no external dependencies beyond npm packages.
 
 ## Quick Start
 
 ```bash
+git clone https://github.com/RPIFisherman/warehouse-assessment.git
 cd warehouse-assessment
 cd backend && npm install && cd ..
 cd frontend && npm install && cd ..
@@ -31,7 +32,7 @@ The backend runs on port 3001, the frontend on port 5173. The frontend dev serve
 | File uploads | Multer |
 | Process orchestration | concurrently |
 
-The frontend uses a CSS variable-based design system ported from the WMS web app, with the UNIS blue brand and dark mode by default.
+The frontend uses a CSS variable-based design system with a blue brand and dark mode by default.
 
 ## Project Structure
 
@@ -39,7 +40,6 @@ The frontend uses a CSS variable-based design system ported from the WMS web app
 warehouse-assessment/
 ├── package.json                       # Root: orchestrates frontend + backend dev servers
 ├── README.md                          # This file
-├── PRD.md                             # Product requirements document
 │
 ├── backend/
 │   ├── package.json
@@ -59,12 +59,12 @@ warehouse-assessment/
 └── frontend/
     ├── package.json
     ├── vite.config.ts                 # Proxy /api and /uploads to backend
-    ├── tailwind.config.js             # Tailwind config with WMS semantic color tokens
+    ├── tailwind.config.js             # Tailwind config with semantic color tokens
     ├── tsconfig.json
     ├── tsconfig.app.json
     ├── postcss.config.js
     ├── env.d.ts
-    ├── index.html                     # Root HTML, applies "dark unis-blue" theme classes
+    ├── index.html                     # Root HTML, applies dark theme classes
     └── src/
         ├── main.ts                    # App bootstrap, Element Plus + Pinia + router
         ├── App.vue                    # Root component
@@ -159,11 +159,9 @@ SQLite, single file at `backend/data/warehouse-assessment.db`. Tables created on
 | `assessment` | Assessment instances |
 | `issue` | Issues logged during an assessment (with `photo_filenames` JSON array) |
 
-See [PRD.md](./PRD.md) section 6 for the complete column definitions.
-
 ## API Endpoints
 
-All endpoints under `/api`. See [PRD.md](./PRD.md) section 5 for request/response shapes.
+All endpoints under `/api`.
 
 ```
 GET    /api/templates
@@ -223,7 +221,7 @@ PUT    /api/settings/presets/:buildingType
 - Native camera capture via `<input capture="environment">` (no upload dialog friction)
 - Responsive container max-width 768px, centered on larger screens
 - `touch-action: manipulation` and disabled `-webkit-tap-highlight-color` for native feel
-- Dark theme default to match WMS production look
+- Dark theme default
 
 ## Reset / Clean State
 
@@ -237,12 +235,12 @@ Photos are stored in `backend/uploads/` and persist independently.
 
 ## Deployment Notes
 
-For sharing the demo via Cloudflare Tunnel (e.g. `https://warehouse-assessment.example.com`):
+For sharing the demo via a public URL (e.g. Cloudflare Tunnel, ngrok, or your own server):
 
 1. Add the public hostname to `frontend/vite.config.ts` under `server.allowedHosts`
 2. Add the public hostname to the CORS whitelist in `backend/src/index.ts`
-3. Use Cloudflare Access (Zero Trust) to restrict access by email — no code changes needed
+3. Restrict access with an identity-aware proxy (e.g. Cloudflare Access) if sharing externally
 
-## See Also
+## License
 
-- **[PRD.md](./PRD.md)** — Full product requirements with acceptance criteria, data shapes, and integration guidance for the WMS team.
+This demo is provided as-is for reference purposes.

@@ -34,3 +34,9 @@ pnpm-debug.log*
 
 # OS
 Thumbs.db
+
+# Internal-only docs (never commit)
+PRD.md
+PRD-internal-backup.md
+*-internal.md
+*-internal-*.md
