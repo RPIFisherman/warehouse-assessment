@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getTemplates, createAssessment, getPresets, getFacilities } from '@/api'
+import { getUserInfo } from '@/utils/auth'
 import { useAssessmentStore } from '@/stores/assessment'
 import type { Template, BuildingType, Facility } from '@/types'
 
@@ -14,7 +15,8 @@ const presets = ref<Record<string, string[]>>({})
 const selectedBuildingType = ref<BuildingType | ''>('')
 const selectedCategories = ref<string[]>([])
 const selectedFacility = ref('')
-const assessorName = ref('Assessor')
+// Prefill from the signed-in IAM user — editable if they want to override.
+const assessorName = ref(getUserInfo()?.userName || getUserInfo()?.email?.split('@')[0] || 'Assessor')
 const creating = ref(false)
 
 function toggleCat(id: string) {

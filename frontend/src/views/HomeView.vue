@@ -1,13 +1,22 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getAssessments } from '@/api'
+import { getUserInfo } from '@/utils/auth'
 import type { Assessment } from '@/types'
 import dayjs from 'dayjs'
 
 const router = useRouter()
 const assessments = ref<Assessment[]>([])
 const loading = ref(true)
+
+const user = getUserInfo()
+const greeting = computed(() => {
+  const hour = new Date().getHours()
+  const timeOfDay = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'
+  const name = user?.userName || user?.email?.split('@')[0] || 'there'
+  return `Good ${timeOfDay}, ${name}`
+})
 
 onMounted(async () => {
   try { assessments.value = await getAssessments() } finally { loading.value = false }
@@ -30,7 +39,7 @@ function openAssessment(a: Assessment) {
   <div class="home-view">
     <div class="header">
       <h1>Warehouse Assessment</h1>
-      <p>Tap-driven facility walkthrough</p>
+      <p>{{ greeting }}</p>
     </div>
 
     <el-button type="primary" class="start-btn" @click="router.push('/assess/new')">
