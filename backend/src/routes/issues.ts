@@ -9,9 +9,10 @@ router.post('/issues', (req, res) => {
     const { assessment_id, checklist_item_id, checklist_label, zone_code, zone_name, severity, comment, photo_filenames } = req.body;
     const id = uuidv4();
     const photos = JSON.stringify(Array.isArray(photo_filenames) ? photo_filenames : []);
+    const createdBy = req.user?.id ?? null;
     db.prepare(
-      'INSERT INTO issue (id, assessment_id, checklist_item_id, checklist_label, zone_code, zone_name, severity, comment, photo_filenames) VALUES (?,?,?,?,?,?,?,?,?)'
-    ).run(id, assessment_id, checklist_item_id, checklist_label, zone_code, zone_name, severity, comment || null, photos);
+      'INSERT INTO issue (id, assessment_id, checklist_item_id, checklist_label, zone_code, zone_name, severity, comment, photo_filenames, created_by_user_id) VALUES (?,?,?,?,?,?,?,?,?,?)'
+    ).run(id, assessment_id, checklist_item_id, checklist_label, zone_code, zone_name, severity, comment || null, photos, createdBy);
     const row = db.prepare('SELECT * FROM issue WHERE id = ?').get(id) as any;
     res.json({ ...row, photo_filenames: JSON.parse(row.photo_filenames || '[]') });
   } catch (e) {

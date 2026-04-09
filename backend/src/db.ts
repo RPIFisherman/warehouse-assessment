@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import type { Database as BetterSqliteDatabase } from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import fs from 'fs';
@@ -9,7 +10,9 @@ const dataDir = path.join(__dirname, '..', 'data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
 const dbPath = path.join(dataDir, 'warehouse-assessment.db');
-const db = new Database(dbPath);
+// Explicit type annotation — without it, tsc --declaration can't name the
+// inferred instance type from the default import and emits TS4023.
+const db: BetterSqliteDatabase = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
@@ -81,6 +84,12 @@ export function initDB() {
     );
   `);
 
+  // Additive migrations — idempotent columns that newer code expects but
+  // older databases may not yet have. ALTER TABLE ADD COLUMN is not
+  // conditional in SQLite, so we gate it behind a PRAGMA table_info check.
+  ensureColumn('assessment', 'created_by_user_id', 'TEXT');
+  ensureColumn('issue', 'created_by_user_id', 'TEXT');
+
   const count = db.prepare('SELECT COUNT(*) as c FROM template').get() as { c: number };
   if (count.c === 0) seed();
   // Always ensure zone_config and presets exist
@@ -88,6 +97,14 @@ export function initDB() {
   if (zoneCount.c === 0) seedZonesAndPresets();
   const facCount = db.prepare('SELECT COUNT(*) as c FROM facility').get() as { c: number };
   if (facCount.c === 0) seedFacilities();
+}
+
+function ensureColumn(table: string, column: string, definition: string): void {
+  const cols = db.pragma(`table_info(${table})`) as { name: string }[];
+  if (!cols.some(c => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    console.log(`Migrated: ${table}.${column} added.`);
+  }
 }
 
 function seed() {

@@ -1,9 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import MobileShell from '@/components/layout/MobileShell.vue'
+import { isLoggedIn } from '@/utils/auth'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { public: true } },
+    { path: '/auth/callback', name: 'auth-callback', component: () => import('@/views/AuthCallbackView.vue'), meta: { public: true } },
     {
       path: '/',
       component: MobileShell,
@@ -20,4 +23,13 @@ const router = createRouter({
     },
   ],
 })
+
+router.beforeEach((to) => {
+  if (to.meta.public) return true
+  if (!isLoggedIn()) {
+    return { name: 'login', query: { from: to.fullPath } }
+  }
+  return true
+})
+
 export default router

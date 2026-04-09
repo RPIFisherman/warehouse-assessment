@@ -16,10 +16,11 @@ router.post('/assessments', (req, res) => {
     const catArray: string[] = Array.isArray(categories) ? categories : [categories];
     const placeholders = catArray.map(() => '?').join(',');
     const totalItems = (db.prepare(`SELECT COUNT(*) as c FROM checklist_item WHERE template_id IN (${placeholders})`).get(...catArray) as { c: number }).c;
+    const createdBy = req.user?.id ?? null;
 
     db.prepare(
-      'INSERT INTO assessment (id, building_type, categories, facility_name, assessor_name, total_items, current_zone) VALUES (?,?,?,?,?,?,?)'
-    ).run(id, building_type, JSON.stringify(catArray), facility_name, assessor_name, totalItems, 'RECEIVING');
+      'INSERT INTO assessment (id, building_type, categories, facility_name, assessor_name, total_items, current_zone, created_by_user_id) VALUES (?,?,?,?,?,?,?,?)'
+    ).run(id, building_type, JSON.stringify(catArray), facility_name, assessor_name, totalItems, 'RECEIVING', createdBy);
 
     const assessment = db.prepare('SELECT * FROM assessment WHERE id = ?').get(id);
     res.json(assessment);

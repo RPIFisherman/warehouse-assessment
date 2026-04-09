@@ -9,6 +9,8 @@ import assessmentsRouter from './routes/assessments.js';
 import issuesRouter from './routes/issues.js';
 import photosRouter from './routes/photos.js';
 import settingsRouter from './routes/settings.js';
+import authRouter from './routes/auth.js';
+import { requireAuth } from './auth/middleware.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadsDir = path.join(__dirname, '..', 'uploads');
@@ -36,6 +38,13 @@ app.use(cors({
 app.use(express.json());
 app.use('/uploads', express.static(uploadsDir));
 
+// Order matters:
+//   1. authRouter first so /api/auth/* is reachable without a token
+//      (login, token exchange, refresh, logout, back-channel session clear).
+//   2. requireAuth gates everything mounted below it.
+//   3. Feature routers — all now require a valid IAM access token.
+app.use('/api', authRouter);
+app.use('/api', requireAuth);
 app.use('/api', templatesRouter);
 app.use('/api', assessmentsRouter);
 app.use('/api', issuesRouter);
