@@ -1,18 +1,18 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { goToLogin } from '@/utils/auth'
+import { ref } from "vue";
+import { goToLogin } from "@/utils/auth";
 
-const loading = ref(false)
-const errorMsg = ref('')
+const loading = ref(false);
+const errorMsg = ref("");
 
 async function signIn() {
-  loading.value = true
-  errorMsg.value = ''
+  loading.value = true;
+  errorMsg.value = "";
   try {
-    await goToLogin()
+    await goToLogin();
   } catch (e) {
-    loading.value = false
-    errorMsg.value = e instanceof Error ? e.message : String(e)
+    loading.value = false;
+    errorMsg.value = e instanceof Error ? e.message : String(e);
   }
 }
 </script>
@@ -23,14 +23,8 @@ async function signIn() {
       <h1>Warehouse Assessment</h1>
       <p class="subtitle">Mobile-first facility walkthrough</p>
 
-      <el-button
-        type="primary"
-        size="large"
-        :loading="loading"
-        class="sign-in-btn"
-        @click="signIn"
-      >
-        Sign in with IAM
+      <el-button type="primary" size="large" :loading="loading" class="sign-in-btn" @click="signIn">
+        Sign in with IAM Stage
       </el-button>
 
       <p v-if="errorMsg" class="err">{{ errorMsg }}</p>
