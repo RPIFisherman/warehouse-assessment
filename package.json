@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "concurrently -n backend,frontend -c blue,green \"cd backend && npm run dev\" \"cd frontend && npm run dev\"",
     "install:all": "cd backend && npm install && cd ../frontend && npm install",
-    "build": "cd frontend && npx vite build"
+    "build": "cd frontend && npx vite build",
+    "preview": "npm run build && concurrently -n backend,preview -c blue,cyan \"cd backend && npm run dev\" \"cd frontend && npx vite preview\"",
+    "start:preview": "concurrently -n backend,preview -c blue,cyan \"cd backend && npm run dev\" \"cd frontend && npx vite preview\""
   },
   "devDependencies": {
     "concurrently": "^9.0.0"
