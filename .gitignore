@@ -8,6 +8,10 @@ dist/
 build/
 *.tsbuildinfo
 
+# vue-tsc -b emits compiled .js next to .ts/.vue source files
+# (build mode ignores --noEmit). These are artifacts, not source.
+frontend/src/**/*.js
+
 # Environment
 .env
 .env.local
