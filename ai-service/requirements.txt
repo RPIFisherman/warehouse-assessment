@@ -3,8 +3,4 @@ uvicorn[standard]
 python-multipart
 python-dotenv
 Pillow
-torch
-transformers
-timm
-einops
 httpx

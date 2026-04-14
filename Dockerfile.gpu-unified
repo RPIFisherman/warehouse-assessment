@@ -1,0 +1,89 @@
+# ═══════════════════════════════════════════════════════════════════
+# Warehouse Assessment — Unified Single Image (GPU)
+# ═══════════════════════════════════════════════════════════════════
+# Same as the CPU image but adds NVIDIA CUDA + Florence-2 support.
+# Falls back to OpenAI/Ollama if no GPU is present at runtime.
+#
+# Build:
+#   docker build -f Dockerfile.gpu-unified -t yuyang2001/warehouse-assessment:gpu .
+#
+# Run:
+#   docker run -d --gpus all -p 80:80 --env-file .env \
+#     -v wa-data:/app/backend/data \
+#     -v wa-uploads:/app/backend/uploads \
+#     -v wa-hf-cache:/root/.cache/huggingface \
+#     yuyang2001/warehouse-assessment:gpu
+# ═══════════════════════════════════════════════════════════════════
+
+# ── Stage 1: Build frontend ──────────────────────────────────────
+FROM node:22-alpine AS frontend-build
+WORKDIR /build
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ .
+RUN find src -name '*.js' -type f -delete 2>/dev/null || true
+RUN npx vite build
+
+# ── Stage 2: Compile backend TypeScript ──────────────────────────
+FROM node:22-alpine AS backend-ts
+WORKDIR /build
+RUN apk add --no-cache python3 make g++
+COPY backend/package.json backend/package-lock.json ./
+RUN npm ci
+COPY backend/tsconfig.json ./
+COPY backend/src ./src
+RUN npx tsc
+
+# ── Stage 3: Runtime (NVIDIA CUDA + Python + Node + nginx) ───────
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
+
+# System packages: Python 3, Node.js 22, nginx, supervisor, ffmpeg
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 python3-pip python3-dev \
+      nginx supervisor ffmpeg ca-certificates \
+      curl gnupg make g++ \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+       | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+       > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── AI service (with GPU deps: torch, transformers) ──
+WORKDIR /app/ai-service
+COPY ai-service/requirements.txt ai-service/requirements-gpu.txt ./
+RUN pip3 install --no-cache-dir \
+    -r requirements.txt -r requirements-gpu.txt
+COPY ai-service/main.py .
+RUN mkdir -p frames annotated
+
+# ── Backend (install deps natively for this glibc, copy compiled TS) ──
+WORKDIR /app/backend
+COPY backend/package.json backend/package-lock.json ./
+RUN npm ci --omit=dev && npm rebuild better-sqlite3 \
+    && apt-get purge -y make g++ && apt-get autoremove -y \
+    && rm -rf /root/.npm
+COPY --from=backend-ts /build/dist/ ./dist/
+RUN mkdir -p data uploads
+
+# ── Frontend static files ──
+COPY --from=frontend-build /build/dist/ /var/www/html/
+
+# ── Configs ──
+RUN rm -f /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf
+COPY nginx-unified.conf /etc/nginx/conf.d/app.conf
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Florence-2 model cache (mount as volume so download persists)
+ENV HF_HOME=/root/.cache/huggingface
+ENV FLORENCE_MODEL_PATH=microsoft/Florence-2-large
+RUN mkdir -p "$HF_HOME"
+
+WORKDIR /app
+EXPOSE 80
+
+VOLUME ["/app/backend/data", "/app/backend/uploads", "/root/.cache/huggingface"]
+
+CMD ["supervisord", "-n", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

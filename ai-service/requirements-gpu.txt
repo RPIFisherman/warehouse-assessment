@@ -1,0 +1,7 @@
+# GPU-only dependencies for Florence-2 local inference.
+# Install alongside requirements.txt when using Dockerfile.gpu:
+#   pip install -r requirements.txt -r requirements-gpu.txt
+torch
+transformers>=4.44,<4.47
+timm
+einops

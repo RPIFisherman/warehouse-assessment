@@ -1,24 +1,30 @@
 # ──────────────────────────────────────────────────────────────────
-# AI Service — FastAPI + ffmpeg (GPU-optional)
+# AI Service — Florence-2 + FastAPI + ffmpeg (NVIDIA GPU required)
 #
-# Runs in API-relay mode by default (OpenAI / Ollama). Florence-2
-# requires a separate GPU-enabled image — see Dockerfile.gpu.
+# Use this Dockerfile when you have an NVIDIA GPU and want local
+# Florence-2 inference with bounding-box support.
+#
+# Build:  docker build -f Dockerfile.gpu -t warehouse-assessment-ai:gpu .
+# Run with docker-compose: see docker-compose.gpu.yml
 # ──────────────────────────────────────────────────────────────────
-FROM python:3.11-slim
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip python3-dev \
     ffmpeg \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements-gpu.txt ./
+RUN pip3 install --no-cache-dir --break-system-packages \
+    -r requirements.txt -r requirements-gpu.txt
 
 COPY main.py .
 
-RUN mkdir -p /app/frames /app/annotated
+ENV HF_HOME=/root/.cache/huggingface
+RUN mkdir -p "$HF_HOME" /app/frames /app/annotated
 
 EXPOSE 8100
 CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8100"]

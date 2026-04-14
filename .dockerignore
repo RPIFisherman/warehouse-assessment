@@ -26,9 +26,11 @@ ai-service/__pycache__/
 **/__pycache__/
 **/*.pyc
 
-# Editor / OS
+# Editor / OS / AI tools
 .vscode/
 .idea/
+.codex/
+.claude/
 *.swp
 .DS_Store
 Thumbs.db

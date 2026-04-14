@@ -6,36 +6,61 @@ This repository is a reference implementation intended to show how a default-OK,
 
 ## Quick Start
 
-### Option A: Docker (recommended for demos)
+### Option A: Single Docker image (recommended)
 
-Requires Docker with NVIDIA GPU support for the AI service.
+No GPU required. Pull and run one image with all services inside:
+
+```bash
+docker run -d -p 80:80 --name warehouse-assessment \
+  -e OPENAI_BASE_URL=http://your-openai-endpoint/v1 \
+  -e OPENAI_API_KEY=your-key \
+  -e OPENAI_MODEL=gpt-4.1 \
+  -v wa-data:/app/backend/data \
+  -v wa-uploads:/app/backend/uploads \
+  yuyang2001/warehouse-assessment:latest
+```
+
+With an env file (recommended — configure OAuth + AI + networking):
+
+```bash
+cp .env.example .env   # fill in your values
+docker run -d -p 80:80 --env-file .env \
+  -v wa-data:/app/backend/data \
+  -v wa-uploads:/app/backend/uploads \
+  yuyang2001/warehouse-assessment:latest
+```
+
+With NVIDIA GPU (adds Florence-2 local inference with bounding boxes):
+
+```bash
+docker run -d --gpus all -p 80:80 --env-file .env \
+  -v wa-data:/app/backend/data \
+  -v wa-uploads:/app/backend/uploads \
+  -v wa-hf-cache:/root/.cache/huggingface \
+  yuyang2001/warehouse-assessment:gpu
+```
+
+| Image | Tag | GPU | Base | Size |
+|---|---|---|---|---|
+| `yuyang2001/warehouse-assessment` | `latest` | No | `python:3.11-slim` | ~1.2 GB |
+| `yuyang2001/warehouse-assessment` | `gpu` | CUDA 12.6 | `nvidia/cuda` | ~10 GB |
+
+### Option B: Docker Compose (multi-container, for development)
 
 ```bash
 git clone https://github.com/RPIFisherman/warehouse-assessment.git
 cd warehouse-assessment
 cp .env.example .env
 # Edit .env — fill in at least one OAuth provider (IAM, Google, or GitHub)
-docker compose up -d --build
+docker compose up -d --build          # no GPU
+# or with GPU:
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 ```
 
 Services start on:
 - **Frontend** (nginx): http://localhost:8080
 - **Backend** (Express): http://localhost:3001
-- **AI Service** (FastAPI + Florence-2): http://localhost:8100
-
-To rebuild after code changes:
-
-```bash
-docker compose down
-docker compose up -d --build
-```
-
-To view logs:
-
-```bash
-docker compose logs -f          # all services
-docker compose logs -f ai       # AI service only
-```
+- **AI Service** (FastAPI): http://localhost:8100
 
 ### Option B: Local development (npm)
 
@@ -57,19 +82,28 @@ npm run dev:no-ai
 
 Open `http://localhost:5173` in Chrome (use DevTools mobile viewport for the phone experience).
 
-#### Run with AI (requires NVIDIA GPU + Python)
+#### Run with AI (no GPU — API relay mode)
 
 ```bash
-pip install fastapi uvicorn[standard] python-multipart Pillow torch transformers timm einops httpx
+pip install fastapi uvicorn[standard] python-multipart Pillow httpx python-dotenv
+npm run dev
+```
+
+Set `OPENAI_BASE_URL` in `.env` to point at an OpenAI-compatible endpoint. The AI service auto-detects no GPU and uses the external API for vision inference.
+
+#### Run with AI + GPU (Florence-2 local inference)
+
+```bash
+pip install fastapi uvicorn[standard] python-multipart Pillow httpx python-dotenv torch 'transformers>=4.44,<4.47' timm einops
 npm run dev
 ```
 
 This starts three services concurrently:
 - **Backend** (Express): port 3001
 - **Frontend** (Vite): port 5173
-- **AI Service** (FastAPI + Florence-2): port 8100
+- **AI Service** (FastAPI): port 8100
 
-The AI service loads Microsoft Florence-2-large (~1.5 GB) into GPU memory on startup. First launch takes 5-10 seconds for model loading; subsequent inference is ~1 second per image on an RTX 5090.
+With a GPU, Florence-2-large (~1.5 GB) loads into GPU memory on startup (~5-10s). Without a GPU, the AI service starts in API-relay mode and defaults to the OpenAI or Ollama backend configured in `.env`.
 
 ## Environment Configuration
 
@@ -97,21 +131,25 @@ https://your-app.example.com/auth/callback
 
 Google appends `?state=google` automatically; GitHub appends `?code=...&state=github`. IAM uses a `state` parameter with the provider name (`iam`).
 
-### AI Service Configuration
+### AI Service Configuration (GPU-optional)
+
+The AI service runs without an NVIDIA GPU. Set at least one external backend:
 
 ```bash
+# OpenAI-compatible API (recommended for no-GPU deployments)
+OPENAI_BASE_URL=http://your-endpoint/v1
+OPENAI_MODEL=gpt-4.1
+OPENAI_API_KEY=your-key
+
 # Ollama (optional — leave empty to disable)
 OLLAMA_HOST=http://127.0.0.1:11434
 OLLAMA_VL_MODEL=qwen3-vl:32b
 
-# OpenAI-compatible relay (optional — leave empty to disable)
-OPENAI_BASE_URL=
-OPENAI_MODEL=gpt-4.1
-OPENAI_API_KEY=managed-by-relay
-
 # Florence-2 sidecar URL (for backend -> sidecar calls)
 FLORENCE_SIDECAR_URL=http://localhost:8100
 ```
+
+When a GPU is present and `torch`+`transformers` are installed, Florence-2 loads automatically. Otherwise the service defaults to the OpenAI or Ollama backend.
 
 ### Networking
 
@@ -122,19 +160,27 @@ ALLOWED_ORIGINS=https://my-tunnel.trycloudflare.com
 
 ## Docker Deployment
 
-The `docker-compose.yml` defines three services:
+### Single image (recommended for production)
+
+Both `yuyang2001/warehouse-assessment:latest` (CPU) and `:gpu` tags bundle all three services (nginx + Express + FastAPI) into one container managed by supervisord. See [Quick Start](#quick-start) above for run commands.
+
+### Docker Compose (development)
+
+The `docker-compose.yml` defines three separate containers (no GPU required):
 
 | Service | Base image | Host port | Internal port | Purpose |
 |---|---|---|---|---|
 | `frontend` | nginx:alpine | 8080 | 80 | Serves built SPA, proxies `/api` and `/api/ai` |
 | `backend` | node:22-alpine | 3001 | 3001 | Express API + SQLite |
-| `ai` | nvidia/cuda:12.6.3 | 8100 | 8100 | Florence-2 inference sidecar (GPU required) |
+| `ai` | python:3.11-slim | — (internal only) | 8100 | AI inference sidecar (API-relay mode) |
 
-### GPU Requirement
+For GPU + Florence-2 support, use the compose override:
 
-The `ai` service requires an NVIDIA GPU. Docker Compose uses `deploy.resources.reservations.devices` to request GPU access. Ensure the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) is installed.
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+```
 
-On first run, Florence-2 weights (~1.5 GB) are downloaded from HuggingFace Hub and cached in the `ai_hf_cache` Docker volume so they persist across container rebuilds.
+This swaps the `ai` service to an `nvidia/cuda:12.6.3` base with torch+transformers. Requires the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html). Florence-2 weights (~1.5 GB) are cached in the `ai_hf_cache` volume.
 
 ### External Services (not containerized)
 
@@ -150,13 +196,11 @@ FLORENCE_SIDECAR_URL=http://ai:8100
 
 ### Persistent Volumes
 
-| Volume | Purpose |
-|---|---|
-| `backend_data` | SQLite database |
-| `backend_uploads` | Photo uploads |
-| `ai_hf_cache` | HuggingFace model weights |
-| `ai_frames` | Extracted video frames |
-| `ai_annotated` | Bounding-box annotated images |
+| Volume | Path (single image) | Purpose |
+|---|---|---|
+| `wa-data` | `/app/backend/data` | SQLite database |
+| `wa-uploads` | `/app/backend/uploads` | Photo uploads |
+| `wa-hf-cache` | `/root/.cache/huggingface` | Florence-2 weights (GPU image only) |
 
 ### Nginx Reverse Proxy
 
@@ -184,7 +228,7 @@ The frontend container runs nginx (`frontend/nginx.conf`) that:
 | AI inference (cloud) | OpenAI-compatible relay (optional, configurable model name) |
 | AI service | Python FastAPI + uvicorn |
 | Video processing | ffmpeg (frame extraction) |
-| Containerization | Docker + docker-compose (3 services) |
+| Containerization | Docker (single image or 3-service compose) |
 | Frontend server (Docker) | Nginx (reverse proxy + SPA serving) |
 | Process orchestration | concurrently (local dev) |
 
@@ -194,14 +238,21 @@ The frontend container runs nginx (`frontend/nginx.conf`) that:
 warehouse-assessment/
 ├── .env.example                           # Template for unified env config (copy to .env)
 ├── .env                                   # Your local config (gitignored)
-├── docker-compose.yml                     # 3-service Docker stack
+├── Dockerfile                             # Unified single image (CPU, no GPU)
+├── Dockerfile.gpu-unified                 # Unified single image (NVIDIA GPU)
+├── docker-compose.yml                     # 3-service stack (no GPU)
+├── docker-compose.gpu.yml                 # GPU override for docker-compose
+├── nginx-unified.conf                     # nginx config for single-image mode
+├── supervisord.conf                       # Process manager for single image
 ├── package.json                           # Root: orchestrates all dev servers
 ├── README.md                              # This file
 │
 ├── ai-service/                            # Python FastAPI sidecar for vision AI
-│   ├── Dockerfile                         # nvidia/cuda:12.6.3 + Python + Florence-2
-│   ├── main.py                            # Florence-2 + qwen3-vl + OpenAI inference, video processing
-│   ├── requirements.txt                   # Python dependencies
+│   ├── Dockerfile                         # CPU-only (python:3.11-slim, lightweight)
+│   ├── Dockerfile.gpu                     # NVIDIA CUDA (Florence-2 support)
+│   ├── main.py                            # GPU-optional: Florence-2 + qwen3-vl + OpenAI inference
+│   ├── requirements.txt                   # Base Python dependencies
+│   ├── requirements-gpu.txt               # GPU-only deps (torch, transformers)
 │   ├── frames/                            # Temp: extracted video frames (gitignored)
 │   └── annotated/                         # Temp: frames with bounding boxes (gitignored)
 │
@@ -479,15 +530,20 @@ For sharing the demo via a public URL (e.g. Cloudflare Tunnel, ngrok):
 
 ### Docker deployment
 
-1. Copy `.env.example` to `.env` and configure OAuth credentials for at least one provider.
-2. Run `docker compose up -d --build` to build and start all three services.
-3. Access the app at http://localhost:8080 (nginx frontend).
-4. For Ollama or OpenAI relay running on the host, use `host.docker.internal` in the `.env`:
+**Single image** (recommended):
+1. Copy `.env.example` to `.env` and configure OAuth + AI backend credentials.
+2. `docker run -d -p 80:80 --env-file .env -v wa-data:/app/backend/data -v wa-uploads:/app/backend/uploads yuyang2001/warehouse-assessment:latest`
+3. Access the app at http://localhost.
+
+**Docker Compose** (development):
+1. Copy `.env.example` to `.env` and configure.
+2. Run `docker compose up -d --build` (no GPU) or add `-f docker-compose.gpu.yml` for GPU support.
+3. Access the app at http://localhost:8080.
+4. For host services (Ollama, OpenAI relay), use `host.docker.internal`:
    ```bash
-   OLLAMA_HOST=http://host.docker.internal:43411
    OPENAI_BASE_URL=http://host.docker.internal:7077/v1
+   OLLAMA_HOST=http://host.docker.internal:43411
    ```
-5. The `docker compose down` command stops all services; volumes persist data between runs.
 
 ## Security Notes
 

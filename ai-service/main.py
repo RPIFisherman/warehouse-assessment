@@ -1,24 +1,23 @@
 """
-AI Video Assessment sidecar — dual model backend.
+AI Video Assessment sidecar — GPU-optional, multi-backend.
 
-Loads microsoft/Florence-2-large into GPU memory on startup (fast local path).
-Also supports qwen3-vl via local Ollama (slower but more accurate/semantic).
+Supports three inference backends, switchable at runtime via POST /config:
+  1. Florence-2 (local GPU) — fast (~1s/img), bounding boxes, requires NVIDIA CUDA
+  2. Ollama qwen3-vl (external) — semantic understanding, via OLLAMA_HOST
+  3. OpenAI-compatible API (external) — via OPENAI_BASE_URL (any provider)
+
+When no NVIDIA GPU is detected (or torch is not installed), the service runs in
+API-relay mode and defaults to the OpenAI or Ollama backend. Florence-2 is
+automatically removed from the available models list.
 
 Exposed endpoints:
-  GET  /health              — liveness + model status
+  GET  /health              — liveness + model status + mode (gpu / api-relay)
   GET  /config              — current active model
   POST /config              — switch active model (runtime, no restart)
-  POST /assess-video        — upload video + questions → per-frame analysis with bboxes
-                              (bboxes only supported by florence-2)
+  POST /assess-video        — upload video + questions → per-frame analysis
+                              (bboxes only with florence-2; API mode returns text findings)
   POST /describe-photos     — analyze photo(s) and generate a contextual AI comment
-                              (both models supported)
   GET  /frames/{sid}/{f}    — serve extracted / annotated frame images
-
-Inference pipeline per frame:
-  1. <DETAILED_CAPTION> → rich scene description
-  2. For each question → extract grounding phrase → <CAPTION_TO_PHRASE_GROUNDING>
-  3. Heuristic issue detection based on caption content + grounding results
-  4. Draw bounding boxes on annotated copy of the frame
 """
 
 from __future__ import annotations
@@ -42,27 +41,30 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 load_dotenv(override=True)  # ai-service/.env can override if it exists
 
 import httpx
-import torch
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image, ImageDraw
+
+# GPU / Florence-2 support is optional. When torch+transformers are installed
+# AND a CUDA GPU is present, Florence-2 loads into GPU for fast local inference.
+# Otherwise the service runs in API-relay mode (OpenAI / Ollama only).
+try:
+    import torch
+    from transformers import AutoModelForCausalLM, AutoProcessor
+    HAS_GPU = torch.cuda.is_available()
+except ImportError:
+    torch = None  # type: ignore[assignment]
+    AutoModelForCausalLM = None  # type: ignore[assignment,misc]
+    AutoProcessor = None  # type: ignore[assignment,misc]
+    HAS_GPU = False
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
-# Florence-2 model path. Accepts either a local snapshot dir OR a HuggingFace
-# identifier ('microsoft/Florence-2-large'). If the env var is unset, we check
-# a common local cache path first, then fall back to the HF hub identifier so
-# transformers will download+cache it on first launch (useful for Docker).
-_LOCAL_DEFAULT = (
-    "/home/yg2404/llm/huggingface/hub/models--microsoft--Florence-2-large"
-    "/snapshots/21a599d414c4d928c9032694c424fb94458e3594"
-)
-MODEL_PATH = os.environ.get(
-    "FLORENCE_MODEL_PATH",
-    _LOCAL_DEFAULT if Path(_LOCAL_DEFAULT).exists() else "microsoft/Florence-2-large",
-)
+# Florence-2 model path. Set FLORENCE_MODEL_PATH to a local snapshot dir or
+# leave unset to download from HuggingFace Hub on first launch.
+MODEL_PATH = os.environ.get("FLORENCE_MODEL_PATH", "microsoft/Florence-2-large")
 BASE_DIR = Path(__file__).parent
 FRAMES_DIR = BASE_DIR / "frames"
 ANNOTATED_DIR = BASE_DIR / "annotated"
@@ -93,10 +95,11 @@ OPENAI_TIMEOUT_SEC = 120
 
 # Active model — runtime-switchable via POST /config.
 # AVAILABLE_MODELS is DYNAMIC — rebuilt on each /health via reachability probes.
-# Florence-2 is always in the list (it's the local model loaded on startup).
+# Florence-2 only appears when HAS_GPU is True.
 # Ollama / OpenAI only appear when their env var is set AND the host is alive.
+# _active_model is overridden in lifespan() when no GPU is present.
 _active_model = "florence-2"
-_models_cache: dict[str, Any] = {"models": ["florence-2"], "checked_at": 0.0}
+_models_cache: dict[str, Any] = {"models": [], "checked_at": 0.0}
 _MODELS_CACHE_TTL_SEC = 10
 
 
@@ -117,7 +120,9 @@ async def _list_available_models() -> list[str]:
     if now - float(_models_cache["checked_at"]) < _MODELS_CACHE_TTL_SEC:
         return list(_models_cache["models"])
 
-    models: list[str] = ["florence-2"]
+    models: list[str] = []
+    if HAS_GPU:
+        models.append("florence-2")
     if OLLAMA_ENABLED and await _probe_reachable(f"{OLLAMA_HOST}/api/version"):
         models.append(OLLAMA_VL_MODEL)
     if OPENAI_BASE_URL and await _probe_reachable(f"{OPENAI_BASE_URL}/models"):
@@ -148,26 +153,43 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    log.info("Loading Florence-2-large into GPU…")
-    t0 = time.time()
-    app.state.processor = AutoProcessor.from_pretrained(MODEL_PATH, trust_remote_code=True)
-    app.state.model = (
-        AutoModelForCausalLM.from_pretrained(
-            MODEL_PATH, torch_dtype=torch.float16, trust_remote_code=True,
+    global _active_model
+
+    if HAS_GPU:
+        log.info("Loading Florence-2-large into GPU…")
+        t0 = time.time()
+        app.state.processor = AutoProcessor.from_pretrained(MODEL_PATH, trust_remote_code=True)
+        app.state.model = (
+            AutoModelForCausalLM.from_pretrained(
+                MODEL_PATH, torch_dtype=torch.float16, trust_remote_code=True,
+            )
+            .to("cuda")
+            .eval()
         )
-        .to("cuda")
-        .eval()
-    )
-    log.info("Model loaded in %.1fs", time.time() - t0)
+        log.info("Model loaded in %.1fs", time.time() - t0)
+    else:
+        app.state.model = None
+        app.state.processor = None
+        log.info("No CUDA GPU — running in API-relay mode (OpenAI / Ollama)")
+        # Default to an available external model
+        if OPENAI_BASE_URL:
+            _active_model = OPENAI_MODEL
+            log.info("Default model: %s (OpenAI-compatible)", OPENAI_MODEL)
+        elif OLLAMA_ENABLED:
+            _active_model = OLLAMA_VL_MODEL
+            log.info("Default model: %s (Ollama)", OLLAMA_VL_MODEL)
+        else:
+            _active_model = ""
+            log.warning("No GPU and no external model configured — "
+                        "set OPENAI_BASE_URL or OLLAMA_HOST in .env")
+
     FRAMES_DIR.mkdir(exist_ok=True)
     ANNOTATED_DIR.mkdir(exist_ok=True)
     yield
     log.info("Shutting down")
 
 
-from transformers import AutoModelForCausalLM, AutoProcessor  # noqa: E402
-
-app = FastAPI(title="Florence-2 AI Assessment", lifespan=lifespan)
+app = FastAPI(title="AI Assessment Sidecar", lifespan=lifespan)
 
 
 from fastapi import Request, HTTPException
@@ -385,6 +407,49 @@ def _draw_bboxes(image: Image.Image, bboxes: list[list[float]], labels: list[str
     return annotated
 
 
+async def _assess_frame_via_api(image: Image.Image, questions: list[str]) -> dict:
+    """
+    Assess a single frame using the active VLM API (OpenAI or Ollama).
+    Returns {"caption": str, "findings": [{question, has_issue, severity, answer}]}.
+    Bounding boxes are not supported in API mode.
+    """
+    questions_text = "\n".join(f"- {q}" for q in questions)
+    prompt = (
+        "You are a warehouse safety inspector analyzing a video frame.\n\n"
+        "1. Describe the scene in detail.\n"
+        "2. Evaluate each question and determine if there is an issue.\n\n"
+        f"Questions:\n{questions_text}\n\n"
+        "Respond ONLY with valid JSON (no markdown fences, no extra text):\n"
+        '{"caption": "detailed scene description", "findings": ['
+        '{"question": "original question text", "has_issue": true/false, '
+        '"severity": "ok" or "low" or "medium" or "high", '
+        '"answer": "1-2 sentence explanation"}]}'
+    )
+
+    raw = ""
+    try:
+        if _active_model == OLLAMA_VL_MODEL:
+            raw = await _call_ollama_vl(prompt, image)
+        else:
+            raw = await _call_openai_vision(prompt, image)
+
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```\w*\n?", "", cleaned)
+            cleaned = re.sub(r"\n?```$", "", cleaned)
+        return json.loads(cleaned)
+    except (json.JSONDecodeError, Exception) as exc:
+        log.warning("API assessment JSON parse failed: %s — raw: %.200s", exc, raw)
+        return {
+            "caption": raw if isinstance(raw, str) else "",
+            "findings": [
+                {"question": q, "has_issue": False, "severity": "ok",
+                 "answer": "Unable to parse model response"}
+                for q in questions
+            ],
+        }
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -392,8 +457,10 @@ def _draw_bboxes(image: Image.Image, bboxes: list[list[float]], labels: list[str
 
 @app.get("/health")
 async def health():
-    model_loaded = hasattr(app.state, "model") and app.state.model is not None
-    gpu = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "none"
+    model_loaded = HAS_GPU and hasattr(app.state, "model") and app.state.model is not None
+    gpu = "none"
+    if HAS_GPU and torch is not None:
+        gpu = torch.cuda.get_device_name(0)
     available = await _list_available_models()
     return {
         "status": "ok",
@@ -401,6 +468,7 @@ async def health():
         "gpu": gpu,
         "active_model": _active_model,
         "available_models": available,
+        "mode": "gpu" if HAS_GPU else "api-relay",
     }
 
 
@@ -480,8 +548,9 @@ async def assess_video(
     if not frame_paths:
         return JSONResponse({"error": "no frames extracted — video may be too short"}, status_code=422)
 
-    model = app.state.model
-    processor = app.state.processor
+    use_florence = _active_model == "florence-2" and HAS_GPU
+    model = app.state.model if use_florence else None
+    processor = app.state.processor if use_florence else None
     results = []
 
     for fi, fpath in enumerate(frame_paths):
@@ -496,80 +565,102 @@ async def assess_video(
             "findings": [],
         }
 
-        # Step 1: Detailed caption for overall scene understanding
-        caption_out = _run_inference(model, processor, image, "<DETAILED_CAPTION>")
-        caption = caption_out.get("<DETAILED_CAPTION>", "")
-        if isinstance(caption, dict):
-            caption = str(caption)
-        frame_result["caption"] = caption
+        if use_florence:
+            # ── Florence-2 path (GPU): grounding + bboxes ──
+            caption_out = _run_inference(model, processor, image, "<DETAILED_CAPTION>")
+            caption = caption_out.get("<DETAILED_CAPTION>", "")
+            if isinstance(caption, dict):
+                caption = str(caption)
+            frame_result["caption"] = caption
 
-        # Step 2: For each question, run phrase grounding
-        for qi, question in enumerate(question_list):
-            phrase = _question_to_phrase(question)
-            is_hazard_q = _is_hazard_question(question)
+            for qi, question in enumerate(question_list):
+                phrase = _question_to_phrase(question)
+                is_hazard_q = _is_hazard_question(question)
 
-            # Run phrase grounding to locate relevant objects
-            grounding_out = _run_inference(
-                model, processor, image,
-                "<CAPTION_TO_PHRASE_GROUNDING>", phrase,
-            )
-            grounding_data = grounding_out.get("<CAPTION_TO_PHRASE_GROUNDING>", {})
-            bboxes = grounding_data.get("bboxes", [])
-            labels = grounding_data.get("labels", [phrase] * len(bboxes))
+                grounding_out = _run_inference(
+                    model, processor, image,
+                    "<CAPTION_TO_PHRASE_GROUNDING>", phrase,
+                )
+                grounding_data = grounding_out.get("<CAPTION_TO_PHRASE_GROUNDING>", {})
+                bboxes = grounding_data.get("bboxes", [])
+                labels = grounding_data.get("labels", [phrase] * len(bboxes))
 
-            # Check if caption mentions related issues
-            caption_issue, caption_explanation = _caption_mentions_issue(caption, question)
+                caption_issue, caption_explanation = _caption_mentions_issue(caption, question)
 
-            # Determine issue status
-            has_issue = False
-            severity = "ok"
-            answer = ""
+                has_issue = False
+                severity = "ok"
+                answer = ""
 
-            if is_hazard_q:
-                # Question asks about hazards — finding related objects = issue
-                if bboxes or caption_issue:
-                    has_issue = True
-                    severity = "high" if len(bboxes) > 1 else "medium"
-                    answer = f"Detected: {phrase} found in frame" + (f". {caption_explanation}" if caption_explanation else "")
-                else:
-                    answer = f"No {phrase} detected — appears OK"
-            else:
-                # Question asks about safety measures — NOT finding them could be an issue
-                if bboxes:
-                    answer = f"{phrase.title()} detected in frame — OK"
-                else:
-                    # Not found — check if caption mentions it
-                    phrase_in_caption = any(w in caption.lower() for w in phrase.lower().split() if len(w) > 3)
-                    if phrase_in_caption:
-                        answer = f"Caption mentions related elements — review recommended"
-                        severity = "low"
-                    else:
+                if is_hazard_q:
+                    if bboxes or caption_issue:
                         has_issue = True
-                        severity = "medium"
-                        answer = f"{phrase.title()} not clearly detected — review recommended"
+                        severity = "high" if len(bboxes) > 1 else "medium"
+                        answer = f"Detected: {phrase} found in frame" + (f". {caption_explanation}" if caption_explanation else "")
+                    else:
+                        answer = f"No {phrase} detected — appears OK"
+                else:
+                    if bboxes:
+                        answer = f"{phrase.title()} detected in frame — OK"
+                    else:
+                        phrase_in_caption = any(w in caption.lower() for w in phrase.lower().split() if len(w) > 3)
+                        if phrase_in_caption:
+                            answer = "Caption mentions related elements — review recommended"
+                            severity = "low"
+                        else:
+                            has_issue = True
+                            severity = "medium"
+                            answer = f"{phrase.title()} not clearly detected — review recommended"
 
-            if has_issue:
-                frame_result["status"] = "issue"
+                if has_issue:
+                    frame_result["status"] = "issue"
 
-            finding: dict[str, Any] = {
-                "question": question,
-                "answer": answer,
-                "has_issue": has_issue,
-                "severity": severity,
-                "grounding_phrase": phrase,
-            }
+                finding: dict[str, Any] = {
+                    "question": question,
+                    "answer": answer,
+                    "has_issue": has_issue,
+                    "severity": severity,
+                    "grounding_phrase": phrase,
+                }
 
-            # Draw bboxes if any found (regardless of issue status — visual context is valuable)
-            if bboxes:
-                color = "#ef4444" if has_issue else "#22c55e"
-                annotated = _draw_bboxes(image, bboxes, labels, color=color)
-                ann_name = f"annotated_{fi:04d}_q{qi}.jpg"
-                ann_path = session_annotated / ann_name
-                annotated.save(ann_path, quality=85)
-                finding["annotated_url"] = f"/api/ai/frames/{session_id}/{ann_name}"
-                finding["bboxes"] = [[int(c) for c in b] for b in bboxes]
+                if bboxes:
+                    color = "#ef4444" if has_issue else "#22c55e"
+                    annotated = _draw_bboxes(image, bboxes, labels, color=color)
+                    ann_name = f"annotated_{fi:04d}_q{qi}.jpg"
+                    ann_path = session_annotated / ann_name
+                    annotated.save(ann_path, quality=85)
+                    finding["annotated_url"] = f"/api/ai/frames/{session_id}/{ann_name}"
+                    finding["bboxes"] = [[int(c) for c in b] for b in bboxes]
 
-            frame_result["findings"].append(finding)
+                frame_result["findings"].append(finding)
+
+        else:
+            # ── API path (OpenAI / Ollama): no bboxes ──
+            api_data = await _assess_frame_via_api(image, question_list)
+            frame_result["caption"] = api_data.get("caption", "")
+
+            api_findings = api_data.get("findings", [])
+            for qi, question in enumerate(question_list):
+                # Match API finding to question by index (prompt preserves order)
+                if qi < len(api_findings):
+                    af = api_findings[qi]
+                    has_issue = bool(af.get("has_issue", False))
+                    severity = af.get("severity", "ok")
+                    answer = af.get("answer", "")
+                else:
+                    has_issue = False
+                    severity = "ok"
+                    answer = "No assessment available"
+
+                if has_issue:
+                    frame_result["status"] = "issue"
+
+                frame_result["findings"].append({
+                    "question": question,
+                    "answer": answer,
+                    "has_issue": has_issue,
+                    "severity": severity,
+                    "grounding_phrase": _question_to_phrase(question),
+                })
 
         results.append(frame_result)
         log.info(
@@ -646,7 +737,7 @@ async def describe_photos(payload: dict):
             continue
         try:
             image = Image.open(p).convert("RGB")
-            if _active_model == "florence-2":
+            if _active_model == "florence-2" and HAS_GPU:
                 cap_out = _run_inference(model, processor, image, "<DETAILED_CAPTION>")
                 cap = cap_out.get("<DETAILED_CAPTION>", "")
                 if isinstance(cap, dict):
