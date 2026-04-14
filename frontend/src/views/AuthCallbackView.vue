@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { loginByCode } from '@/utils/auth'
+import { loginByCode, type AuthProvider } from '@/utils/auth'
 
 const router = useRouter()
 const status = ref<'working' | 'error'>('working')
@@ -10,7 +10,12 @@ const errorMsg = ref('')
 onMounted(async () => {
   const params = new URLSearchParams(window.location.search)
   const code = params.get('code')
-  const from = params.get('state') || '/'
+  // Provider is passed via the `state` param (we set it in buildAuthorizeUrl)
+  // IAM doesn't use state, so fall back to 'iam' when missing
+  const state = params.get('state') || 'iam'
+  const provider: AuthProvider = ['google', 'github', 'iam'].includes(state)
+    ? (state as AuthProvider)
+    : 'iam'
 
   if (!code) {
     status.value = 'error'
@@ -20,9 +25,9 @@ onMounted(async () => {
   }
 
   try {
-    await loginByCode(code)
-    // Strip the code from the URL so a refresh doesn't re-trigger the exchange.
-    router.replace(from.startsWith('/') ? from : '/')
+    // Forward the full state string (provider:nonce) so backend can validate CSRF
+    await loginByCode(code, provider, state)
+    router.replace('/')
   } catch (e) {
     console.error('OAuth callback failed', e)
     status.value = 'error'

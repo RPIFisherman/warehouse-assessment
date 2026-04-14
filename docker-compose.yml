@@ -1,0 +1,94 @@
+# ═══════════════════════════════════════════════════════════════════
+# Warehouse Assessment — Docker Compose
+# ═══════════════════════════════════════════════════════════════════
+# Three services:
+#   frontend  — nginx serving built SPA + proxying /api and /api/ai
+#   backend   — Express + SQLite (data persisted via volume)
+#   ai        — Florence-2 inference sidecar (requires NVIDIA GPU)
+#
+# External services (NOT containerized — reached via env vars):
+#   - Ollama (qwen3-vl) — leave OLLAMA_HOST empty to disable
+#   - OpenAI-compatible relay — leave OPENAI_BASE_URL empty to disable
+#
+# Host access from inside containers: use `host.docker.internal`.
+# Example .env entries for Docker deployment:
+#   OLLAMA_HOST=http://host.docker.internal:43411
+#   OPENAI_BASE_URL=http://host.docker.internal:7077/v1
+# ═══════════════════════════════════════════════════════════════════
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: warehouse-assessment-backend:latest
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "3001:3001"
+    volumes:
+      - backend_data:/app/data          # SQLite DB
+      - backend_uploads:/app/uploads    # Photo uploads
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - app
+
+  ai:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    image: warehouse-assessment-ai:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Override inside container — 127.0.0.1 on the host becomes
+      # host.docker.internal from the container's network namespace.
+      # Leave empty in .env to disable that backend; the Settings dropdown
+      # automatically drops unreachable models.
+      - FLORENCE_MODEL_PATH=microsoft/Florence-2-large
+    # Port 8100 intentionally NOT exposed to host — only reachable via
+    # the nginx proxy (/api/ai/*) on the internal Docker network.
+    # This prevents unauthenticated direct access to inference endpoints.
+    expose:
+      - "8100"
+    volumes:
+      - ai_hf_cache:/root/.cache/huggingface  # Florence-2 weights (persists across rebuilds)
+      - ai_frames:/app/frames                 # Extracted video frames
+      - ai_annotated:/app/annotated           # Bbox-annotated images
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - app
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: warehouse-assessment-frontend:latest
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+      - ai
+    networks:
+      - app
+
+volumes:
+  backend_data:
+  backend_uploads:
+  ai_hf_cache:
+  ai_frames:
+  ai_annotated:
+
+networks:
+  app:
+    driver: bridge

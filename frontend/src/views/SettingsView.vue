@@ -6,11 +6,56 @@ import {
   getZones, createZone, updateZone, deleteZone,
   getPresets, updatePreset,
   getFacilities, createFacility, updateFacility, deleteFacility,
+  getAIConfig, setAIModel,
 } from '@/api'
 import type { Template, ChecklistItem, ZoneConfig, BuildingType, Facility } from '@/types'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const activeTab = ref('categories')
+
+// ── AI Model ──
+const aiActiveModel = ref<string>('')
+const aiAvailableModels = ref<string[]>([])
+const aiLoading = ref(false)
+const aiSwitching = ref(false)
+
+async function loadAIConfig() {
+  aiLoading.value = true
+  try {
+    const cfg = await getAIConfig()
+    aiActiveModel.value = cfg.active_model
+    aiAvailableModels.value = cfg.available_models
+  } catch (e) {
+    aiActiveModel.value = ''
+    aiAvailableModels.value = []
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+async function handleSwitchModel(newModel: string) {
+  if (!newModel || newModel === aiActiveModel.value) return
+  aiSwitching.value = true
+  try {
+    const r = await setAIModel(newModel)
+    aiActiveModel.value = r.active_model
+    ElMessage.success(`Switched to ${r.active_model}`)
+  } catch (e: any) {
+    const detail = e?.response?.data?.error || String(e)
+    ElMessage.error(`Switch failed: ${detail}`)
+    // Revert the select to the actual current state
+    await loadAIConfig()
+  } finally {
+    aiSwitching.value = false
+  }
+}
+
+function modelDisplayName(m: string): string {
+  if (m === 'florence-2') return 'Florence-2 (fast, ~1s/image, bboxes)'
+  if (m.startsWith('qwen3-vl')) return `${m} (via Ollama, ~15-20s/image)`
+  // OpenAI-compatible models (gpt-4.1, gpt-5, etc.)
+  return `${m} (OpenAI relay, ~3-8s/image)`
+}
 
 // ── Categories ──
 const categories = ref<Template[]>([])
@@ -204,7 +249,7 @@ async function togglePreset(bt: string, catId: string) {
 
 // ── Init ──
 onMounted(async () => {
-  await Promise.all([loadCategories(), loadZones(), loadPresets(), loadFacilities()])
+  await Promise.all([loadCategories(), loadZones(), loadPresets(), loadFacilities(), loadAIConfig()])
 })
 </script>
 
@@ -218,6 +263,7 @@ onMounted(async () => {
       <button class="tab" :class="{ active: activeTab === 'zones' }" @click="activeTab = 'zones'">Zones</button>
       <button class="tab" :class="{ active: activeTab === 'facilities' }" @click="activeTab = 'facilities'">Facilities</button>
       <button class="tab" :class="{ active: activeTab === 'presets' }" @click="activeTab = 'presets'">Presets</button>
+      <button class="tab" :class="{ active: activeTab === 'aimodel' }" @click="activeTab = 'aimodel'">AI Model</button>
     </div>
 
     <!-- ═══ Categories Tab ═══ -->
@@ -359,6 +405,72 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+
+    <!-- ═══ AI Model Tab ═══ -->
+    <div v-if="activeTab === 'aimodel'" class="tab-content">
+      <p class="hint">
+        Select which vision model the AI Scan and auto-comment features use.
+        Both models run locally. Switching takes effect immediately — no restart.
+      </p>
+
+      <div v-if="aiLoading" class="empty">Loading…</div>
+      <div v-else-if="!aiAvailableModels.length" class="empty">
+        AI service unreachable. Make sure the sidecar is running on port 8100.
+      </div>
+      <div v-else class="model-card">
+        <div class="model-row">
+          <label>Active model:</label>
+          <el-select
+            :model-value="aiActiveModel"
+            :loading="aiSwitching"
+            :disabled="aiSwitching"
+            size="default"
+            style="flex: 1"
+            @change="handleSwitchModel"
+          >
+            <el-option
+              v-for="m in aiAvailableModels"
+              :key="m"
+              :value="m"
+              :label="modelDisplayName(m)"
+            />
+          </el-select>
+        </div>
+
+        <div class="model-desc">
+          <div class="model-compare">
+            <div class="model-col">
+              <div class="model-col-title">Florence-2</div>
+              <ul>
+                <li>Fast: ~1 s per image on RTX 5090</li>
+                <li>Supports phrase grounding + bounding boxes</li>
+                <li>Descriptions are generic — no safety reasoning</li>
+                <li>Required for AI Video Scan bbox overlays</li>
+              </ul>
+            </div>
+            <div class="model-col">
+              <div class="model-col-title">qwen3-vl:32b (Ollama)</div>
+              <ul>
+                <li>Slow: ~15-20 s per image</li>
+                <li>No bounding boxes (description only)</li>
+                <li>Understands context, reasons about hazards</li>
+                <li>Best for auto-comments on issue photos</li>
+              </ul>
+            </div>
+            <div class="model-col">
+              <div class="model-col-title">OpenAI Relay (e.g. gpt-4.1 / gpt-5)</div>
+              <ul>
+                <li>~3-8 s per image via API</li>
+                <li>No bounding boxes (description only)</li>
+                <li>Best reasoning — identifies hazards + explains why</li>
+                <li>Requires nginx relay or OpenAI-compatible endpoint</li>
+                <li>Model name configurable via OPENAI_MODEL in .env</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -422,4 +534,28 @@ h2 { font-size: 22px; font-weight: 700; color: var(--text-primary); margin: 0 0 
   &:not(:last-child) { border-bottom: 1px solid var(--border-primary); }
 }
 .preset-label { font-size: 14px; color: var(--text-primary); }
+
+.model-card {
+  background: var(--bg-secondary); border: 1px solid var(--border-primary);
+  border-radius: 10px; padding: 14px;
+}
+.model-row {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 14px;
+  label { font-size: 13px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
+}
+.model-desc { border-top: 1px solid var(--border-primary); padding-top: 12px; }
+.model-compare {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;
+}
+.model-col {
+  background: var(--bg-primary); border: 1px solid var(--border-primary);
+  border-radius: 8px; padding: 10px 12px;
+}
+.model-col-title {
+  font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px;
+}
+.model-col ul {
+  margin: 0; padding-left: 18px;
+  li { font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+}
 </style>

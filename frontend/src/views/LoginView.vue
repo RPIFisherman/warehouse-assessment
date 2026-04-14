@@ -1,17 +1,40 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { goToLogin } from "@/utils/auth";
+import { ref, onMounted } from "vue";
+import { goToLogin, type AuthProvider } from "@/utils/auth";
 
-const loading = ref(false);
+const loading = ref<AuthProvider | null>(null);
 const errorMsg = ref("");
+const providers = ref<AuthProvider[]>([]);
 
-async function signIn() {
-  loading.value = true;
+const providerInfo: Record<string, { label: string; icon: string; color: string }> = {
+  iam: {
+    label: "Sign in with IAM-staging",
+    icon: "OfficeBuilding",
+    color: "var(--bg-brand-primary)",
+  },
+  google: { label: "Sign in with Google", icon: "ChromeFilled", color: "#4285f4" },
+  github: { label: "Sign in with GitHub", icon: "Link", color: "#24292f" },
+};
+
+onMounted(async () => {
+  try {
+    const res = await fetch("/api/auth/providers");
+    if (res.ok) {
+      const data = await res.json();
+      providers.value = data.providers || ["iam"];
+    }
+  } catch {
+    providers.value = ["iam"];
+  }
+});
+
+async function signIn(provider: AuthProvider) {
+  loading.value = provider;
   errorMsg.value = "";
   try {
-    await goToLogin();
+    await goToLogin(provider);
   } catch (e) {
-    loading.value = false;
+    loading.value = null;
     errorMsg.value = e instanceof Error ? e.message : String(e);
   }
 }
@@ -23,9 +46,22 @@ async function signIn() {
       <h1>Warehouse Assessment</h1>
       <p class="subtitle">Mobile-first facility walkthrough</p>
 
-      <el-button type="primary" size="large" :loading="loading" class="sign-in-btn" @click="signIn">
-        Sign in with IAM Stage
-      </el-button>
+      <div class="btn-stack">
+        <el-button
+          v-for="p in providers"
+          :key="p"
+          type="primary"
+          size="large"
+          :loading="loading === p"
+          :disabled="loading !== null && loading !== p"
+          class="sign-in-btn"
+          :style="{ '--btn-bg': providerInfo[p]?.color }"
+          @click="signIn(p)"
+        >
+          <el-icon><component :is="providerInfo[p]?.icon || 'User'" /></el-icon>
+          {{ providerInfo[p]?.label || `Sign in with ${p}` }}
+        </el-button>
+      </div>
 
       <p v-if="errorMsg" class="err">{{ errorMsg }}</p>
     </div>
@@ -56,10 +92,27 @@ h1 {
   margin: 0;
   opacity: 0.7;
 }
+.btn-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
 .sign-in-btn {
   width: 100%;
   height: 48px;
   font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 10px;
+  border: none;
+  background-color: var(--btn-bg, var(--el-color-primary)) !important;
+  color: #fff !important;
+  /* Override Element Plus default `.el-button+.el-button { margin-left: 12px }`
+     that shifts Google + GitHub buttons right because they follow IAM in a
+     vertical stack. .btn-stack already uses `gap`, no margin needed. */
+  margin-left: 0 !important;
 }
 .err {
   color: var(--el-color-danger);

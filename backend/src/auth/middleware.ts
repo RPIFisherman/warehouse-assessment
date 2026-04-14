@@ -15,7 +15,7 @@
 
 import type { RequestHandler } from 'express';
 import crypto from 'node:crypto';
-import { getUserInfo, type UserInfo } from './iamClient.js';
+import { validateToken, type Provider, type UserInfo } from './oauthProviders.js';
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 1000;
@@ -62,7 +62,11 @@ export const requireAuth: RequestHandler = async (req, res, next) => {
     return;
   }
 
-  const key = tokenFingerprint(token);
+  // Provider can be passed via X-Auth-Provider header (frontend sends it)
+  const providerHeader = req.headers['x-auth-provider'] as string | undefined;
+  const provider: Provider = (providerHeader === 'google' || providerHeader === 'github') ? providerHeader : 'iam';
+
+  const key = tokenFingerprint(token + ':' + provider);
   const hit = cache.get(key);
   const now = Date.now();
   if (hit && hit.expiresAt > now) {
@@ -72,7 +76,7 @@ export const requireAuth: RequestHandler = async (req, res, next) => {
   }
 
   try {
-    const user = await getUserInfo(token);
+    const user = await validateToken(provider, token);
     cache.set(key, { user, expiresAt: now + CACHE_TTL_MS });
     evictIfFull();
     req.user = user;

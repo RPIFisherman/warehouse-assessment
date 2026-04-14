@@ -16,14 +16,21 @@ import path from 'path'
 // For tunnel exposure (Cloudflare Tunnel, ngrok, etc.) ALWAYS use `npm run build`
 // then `npm run preview` — never `npm run dev`.
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '')
+  // Read env from the root .env (one dir up) + local overrides
+  const env = loadEnv(mode, path.resolve(__dirname, '..'), '')
   const allowedHosts = (env.ALLOWED_HOSTS || '')
     .split(',')
     .map(h => h.trim())
     .filter(Boolean)
 
-  // /api and /uploads go to the Express backend in both dev and preview.
+  // /api/ai goes to the Python Florence-2 sidecar; everything else to Express.
+  // Order matters — more-specific prefix MUST come first.
   const proxy = {
+    '/api/ai': {
+      target: 'http://localhost:8100',
+      rewrite: (path: string) => path.replace(/^\/api\/ai/, ''),
+      timeout: 300000,      // 5 min — video processing is slow
+    },
     '/api': 'http://localhost:3001',
     '/uploads': 'http://localhost:3001',
   }

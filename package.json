@@ -3,11 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently -n backend,frontend -c blue,green \"cd backend && npm run dev\" \"cd frontend && npm run dev\"",
+    "dev": "concurrently -n backend,frontend,ai -c blue,green,magenta \"cd backend && npm run dev\" \"cd frontend && npm run dev\" \"cd ai-service && python3 -m uvicorn main:app --host 0.0.0.0 --port 8100 --reload\"",
+    "dev:no-ai": "concurrently -n backend,frontend -c blue,green \"cd backend && npm run dev\" \"cd frontend && npm run dev\"",
     "install:all": "cd backend && npm install && cd ../frontend && npm install",
     "build": "cd frontend && npx vite build",
-    "preview": "npm run build && concurrently -n backend,preview -c blue,cyan \"cd backend && npm run dev\" \"cd frontend && npx vite preview\"",
-    "start:preview": "concurrently -n backend,preview -c blue,cyan \"cd backend && npm run dev\" \"cd frontend && npx vite preview\""
+    "preview": "npm run build && concurrently -n backend,preview,ai -c blue,cyan,magenta \"cd backend && npm run dev\" \"cd frontend && npx vite preview\" \"cd ai-service && python3 -m uvicorn main:app --host 0.0.0.0 --port 8100\"",
+    "start:preview": "concurrently -n backend,preview -c blue,cyan \"cd backend && npm run dev\" \"cd frontend && npx vite preview\"",
+    "start:preview:ai": "concurrently -n backend,preview,ai -c blue,cyan,magenta \"cd backend && npm run dev\" \"cd frontend && npx vite preview\" \"cd ai-service && python3 -m uvicorn main:app --host 0.0.0.0 --port 8100\""
   },
   "devDependencies": {
     "concurrently": "^9.0.0"
