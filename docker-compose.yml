@@ -1,0 +1,80 @@
+# ═══════════════════════════════════════════════════════════════════
+# Warehouse Assessment — Docker Compose (GPU-optional)
+# ═══════════════════════════════════════════════════════════════════
+# Three services:
+#   frontend  — nginx serving built SPA + proxying /api and /api/ai
+#   backend   — Express + SQLite (data persisted via volume)
+#   ai        — AI assessment sidecar (no GPU required)
+#
+# The AI service runs in API-relay mode by default, routing vision
+# requests to an OpenAI-compatible endpoint (OPENAI_BASE_URL) or
+# Ollama (OLLAMA_HOST). Set at least one of these in your .env.
+#
+# For GPU/Florence-2 support, use docker-compose.gpu.yml instead.
+#
+# Host access from inside containers: use `host.docker.internal`.
+# Example .env entries for Docker deployment:
+#   OPENAI_BASE_URL=http://host.docker.internal:7077/v1
+#   OLLAMA_HOST=http://host.docker.internal:43411
+# ═══════════════════════════════════════════════════════════════════
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: warehouse-assessment-backend:latest
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "3001:3001"
+    volumes:
+      - backend_data:/app/data          # SQLite DB
+      - backend_uploads:/app/uploads    # Photo uploads
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - app
+
+  ai:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    image: warehouse-assessment-ai:latest
+    restart: unless-stopped
+    env_file: .env
+    # Port 8100 intentionally NOT exposed to host — only reachable via
+    # the nginx proxy (/api/ai/*) on the internal Docker network.
+    expose:
+      - "8100"
+    volumes:
+      - ai_frames:/app/frames                 # Extracted video frames
+      - ai_annotated:/app/annotated           # Bbox-annotated images
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - app
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: warehouse-assessment-frontend:latest
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+      - ai
+    networks:
+      - app
+
+volumes:
+  backend_data:
+  backend_uploads:
+  ai_frames:
+  ai_annotated:
+
+networks:
+  app:
+    driver: bridge

@@ -1,5 +1,5 @@
 import axios, { AxiosError, AxiosHeaders, type InternalAxiosRequestConfig } from 'axios'
-import { getAccessToken, refreshAccessToken, goToLogin } from '@/utils/auth'
+import { getAccessToken, getProvider, refreshAccessToken, goToLogin } from '@/utils/auth'
 
 const client = axios.create({ baseURL: '/api', timeout: 10000 })
 
@@ -9,6 +9,7 @@ client.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   if (token) {
     if (!config.headers) config.headers = new AxiosHeaders()
     config.headers.set('Authorization', `Bearer ${token}`)
+    config.headers.set('X-Auth-Provider', getProvider())
   }
   return config
 })

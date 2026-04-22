@@ -27,6 +27,9 @@ export interface UserInfo {
 const KEY_ACCESS = 'access_token'
 const KEY_REFRESH = 'refresh_token'
 const KEY_USER = 'user_info'
+const KEY_PROVIDER = 'auth_provider'
+
+export type AuthProvider = 'iam' | 'google' | 'github'
 
 export function getAccessToken(): string {
   return localStorage.getItem(KEY_ACCESS) || ''
@@ -41,10 +44,15 @@ export function setTokens(accessToken: string, refreshToken: string): void {
   localStorage.setItem(KEY_REFRESH, refreshToken)
 }
 
+export function getProvider(): AuthProvider {
+  return (localStorage.getItem(KEY_PROVIDER) as AuthProvider) || 'iam'
+}
+
 export function clearAuth(): void {
   localStorage.removeItem(KEY_ACCESS)
   localStorage.removeItem(KEY_REFRESH)
   localStorage.removeItem(KEY_USER)
+  localStorage.removeItem(KEY_PROVIDER)
 }
 
 export function isLoggedIn(): boolean {
@@ -62,22 +70,21 @@ function setUserInfo(info: UserInfo): void {
 
 // ---------- auth flow ----------
 
-/** Redirect the browser to IAM's login page. Never resolves. */
-export async function goToLogin(): Promise<never> {
-  const res = await fetch(`${API_BASE}/auth/authorize-url`)
+/** Redirect the browser to a provider's login page. Never resolves. */
+export async function goToLogin(provider: AuthProvider = 'iam'): Promise<never> {
+  const res = await fetch(`${API_BASE}/auth/authorize-url?provider=${provider}`)
   if (!res.ok) throw new Error(`authorize-url failed: ${res.status}`)
   const url = (await res.text()).trim()
   window.location.href = url
-  // Browser navigation is async — return a promise that never settles so callers
-  // don't run more code after the redirect starts.
   return new Promise<never>(() => {})
 }
 
-/** Clear local state and redirect to IAM's logout page. Never resolves. */
+/** Clear local state and redirect to the provider's logout page. Never resolves. */
 export async function logout(): Promise<never> {
+  const provider = getProvider()
   let url = '/'
   try {
-    const res = await fetch(`${API_BASE}/auth/logout-url`)
+    const res = await fetch(`${API_BASE}/auth/logout-url?provider=${provider}`)
     if (res.ok) url = (await res.text()).trim()
   } catch {
     // If logout-url lookup fails, fall back to local clear + root redirect.
@@ -88,20 +95,21 @@ export async function logout(): Promise<never> {
 }
 
 /** Exchange the OAuth code for tokens. Called by the callback view. */
-export async function loginByCode(code: string): Promise<{ accessToken: string; refreshToken: string; userInfo?: UserInfo }> {
+export async function loginByCode(code: string, provider: AuthProvider = 'iam', state?: string): Promise<{ accessToken: string; refreshToken: string; userInfo?: UserInfo; provider: AuthProvider }> {
   const res = await fetch(`${API_BASE}/auth/login-by-code`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code }),
+    body: JSON.stringify({ code, provider, state }),
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`login-by-code failed: ${res.status} ${text}`)
   }
-  const data = (await res.json()) as { accessToken: string; refreshToken: string; userInfo?: UserInfo }
-  setTokens(data.accessToken, data.refreshToken)
+  const data = (await res.json()) as { accessToken: string; refreshToken: string; userInfo?: UserInfo; provider?: AuthProvider }
+  setTokens(data.accessToken, data.refreshToken || '')
+  localStorage.setItem(KEY_PROVIDER, data.provider || provider)
   if (data.userInfo) setUserInfo(data.userInfo)
-  return data
+  return { ...data, provider: (data.provider || provider) as AuthProvider }
 }
 
 // ---------- refresh (single-flight) ----------

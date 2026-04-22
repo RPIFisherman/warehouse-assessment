@@ -42,3 +42,41 @@ export const deleteFacility = (id: string) => client.delete(`/settings/facilitie
 
 export const getPresets = () => client.get<Record<string, string[]>>('/settings/presets').then(r => r.data)
 export const updatePreset = (buildingType: string, templateIds: string[]) => client.put(`/settings/presets/${buildingType}`, { template_ids: templateIds }).then(r => r.data)
+
+// AI Video Assessment (Florence-2 / qwen3-vl sidecar)
+export const aiHealthCheck = () => client.get<{
+  status: string
+  model_loaded: boolean
+  gpu: string
+  active_model: string
+  available_models: string[]
+}>('/ai/health').then(r => r.data)
+export const getAIConfig = () => client.get<{ active_model: string; available_models: string[] }>('/ai/config').then(r => r.data)
+export const setAIModel = (model: string) => client.post<{ active_model: string }>('/ai/config', { model }).then(r => r.data)
+export const assessVideo = (video: File, questions: string[], frameInterval: number = 3) => {
+  const fd = new FormData()
+  fd.append('video', video)
+  fd.append('questions', JSON.stringify(questions))
+  fd.append('frame_interval', String(frameInterval))
+  return client.post<{
+    session_id: string
+    total_frames: number
+    total_issues: number
+    results: Array<{
+      frame_index: number
+      timestamp_sec: number
+      frame_url: string
+      status: string
+      caption: string
+      findings: Array<{
+        question: string
+        answer: string
+        has_issue: boolean
+        severity: string
+        grounding_phrase: string
+        annotated_url?: string
+        bboxes?: number[][]
+      }>
+    }>
+  }>('/ai/assess-video', fd, { timeout: 300000 }).then(r => r.data)
+}

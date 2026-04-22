@@ -1,0 +1,31 @@
+# ═══════════════════════════════════════════════════════════════════
+# GPU override — adds NVIDIA GPU + Florence-2 support to AI service
+# ═══════════════════════════════════════════════════════════════════
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+#
+# Requires:
+#   - NVIDIA GPU with CUDA 12.6+ compatible drivers
+#   - NVIDIA Container Toolkit installed on host
+# ═══════════════════════════════════════════════════════════════════
+
+services:
+  ai:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile.gpu
+    image: warehouse-assessment-ai:gpu
+    environment:
+      - FLORENCE_MODEL_PATH=microsoft/Florence-2-large
+    volumes:
+      - ai_hf_cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  ai_hf_cache:

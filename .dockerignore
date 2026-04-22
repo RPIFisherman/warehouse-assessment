@@ -1,0 +1,44 @@
+# Never ship these into any build context
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+build/
+**/build/
+.git/
+.gitignore
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# Per-service compiled artifacts we regenerate in the Dockerfile
+frontend/src/**/*.js
+frontend/src/**/*.vue.js
+
+# Runtime data — never bake into images
+backend/data/
+backend/uploads/
+ai-service/frames/
+ai-service/annotated/
+ai-service/__pycache__/
+**/__pycache__/
+**/*.pyc
+
+# Editor / OS / AI tools
+.vscode/
+.idea/
+.codex/
+.claude/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Internal docs — never commit, never in images
+PRD*.md
+*-internal*.md
+
+# Logs
+*.log
+logs/

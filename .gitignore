@@ -12,6 +12,11 @@ build/
 # (build mode ignores --noEmit). These are artifacts, not source.
 frontend/src/**/*.js
 
+# AI service temp files (frames, annotated images, Python cache)
+ai-service/frames/
+ai-service/annotated/
+ai-service/__pycache__/
+
 # Environment
 .env
 .env.local
