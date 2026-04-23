@@ -1,10 +1,16 @@
 // IAM OAuth2 client — wraps item.pub Central/IAM endpoints.
 // All outbound calls use Node 18+ global fetch; no third-party deps.
 //
-// Upstream contract (see IAM 落地页接入步骤 PDF):
-//   POST {domain}/oauth2/token            grant_type=authorization_code|refresh_token
+// Upstream contract (per IAM OAuth2 Onboarding SKILL.md):
+//   POST {domain}/platform/oauth2/token   Content-Type: application/json, Basic Auth
 //   GET  {domain}/user-info               Authorization: Bearer <access_token>
 //   GET  {domain}/oauth2/logout?post_logout_redirect_uri=...
+//
+// IMPORTANT — IAM platform deviates from standard OAuth2 in three ways:
+//   1. Token endpoint path includes /platform/ prefix
+//   2. Token requests use application/json (NOT form-urlencoded)
+//   3. Token request body uses camelCase field names (grantType, redirectUri)
+//   4. All responses are wrapped in { code, data, msg, success } envelope
 // Credentials are sent via HTTP Basic Auth (clientId:clientSecret).
 
 const DOMAIN = (process.env.OAUTH_IAM_DOMAIN || '').replace(/\/+$/, '');
@@ -40,6 +46,7 @@ interface IamEnvelope<T> {
   code: number;
   msg: string;
   data: T;
+  success: boolean;
 }
 
 function assertConfigured(): void {
@@ -54,9 +61,7 @@ function basicAuthHeader(): string {
   return `Basic ${creds}`;
 }
 
-// Replace the first 3 %s placeholders in the template with domain, clientId, encoded redirect_uri.
-// Extra %s (e.g. a scope placeholder) left in place so you can still use 4+ placeholders if the
-// template ever grows — but we only substitute 3 by default to stay faithful to the PDF Java example.
+// Replace the first 3 %s placeholders in the template with domain, clientId, redirect_uri.
 function format3(template: string, a: string, b: string, c: string): string {
   let i = 0;
   return template.replace(/%s/g, () => {
@@ -86,47 +91,57 @@ export function buildLogoutUrl(): string {
 
 export async function exchangeCodeForToken(code: string): Promise<TokenResponse> {
   assertConfigured();
-  const body = new URLSearchParams();
-  body.set('grant_type', 'authorization_code');
-  body.set('code', code);
-  body.set('redirect_uri', REDIRECT_URI);
-
-  const res = await fetch(`${DOMAIN}/oauth2/token`, {
+  // IAM uses JSON body with camelCase fields (not standard form-urlencoded)
+  const res = await fetch(`${DOMAIN}/platform/oauth2/token`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Type': 'application/json',
       'Authorization': basicAuthHeader(),
     },
-    body: body.toString(),
+    body: JSON.stringify({
+      grantType: 'authorization_code',
+      code,
+      redirectUri: REDIRECT_URI,
+    }),
   });
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`IAM token exchange failed (${res.status}): ${text}`);
   }
-  return (await res.json()) as TokenResponse;
+
+  // IAM wraps token response in { code, data, msg, success } envelope
+  const wrapped = (await res.json()) as IamEnvelope<TokenResponse>;
+  if (wrapped.code !== 0 || !wrapped.success) {
+    throw new Error(`IAM token exchange returned code ${wrapped.code}: ${wrapped.msg}`);
+  }
+  return wrapped.data;
 }
 
 export async function refreshAccessToken(refreshToken: string): Promise<TokenResponse> {
   assertConfigured();
-  const body = new URLSearchParams();
-  body.set('grant_type', 'refresh_token');
-  body.set('refresh_token', refreshToken);
-
-  const res = await fetch(`${DOMAIN}/oauth2/token`, {
+  const res = await fetch(`${DOMAIN}/platform/oauth2/token`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Type': 'application/json',
       'Authorization': basicAuthHeader(),
     },
-    body: body.toString(),
+    body: JSON.stringify({
+      grantType: 'refresh_token',
+      refreshToken,
+    }),
   });
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`IAM token refresh failed (${res.status}): ${text}`);
   }
-  return (await res.json()) as TokenResponse;
+
+  const wrapped = (await res.json()) as IamEnvelope<TokenResponse>;
+  if (wrapped.code !== 0 || !wrapped.success) {
+    throw new Error(`IAM token refresh returned code ${wrapped.code}: ${wrapped.msg}`);
+  }
+  return wrapped.data;
 }
 
 export async function getUserInfo(accessToken: string): Promise<UserInfo> {
@@ -141,7 +156,7 @@ export async function getUserInfo(accessToken: string): Promise<UserInfo> {
     throw new Error(`IAM user-info failed (${res.status}): ${text}`);
   }
 
-  // IAM wraps the payload: { code, msg, data: UserInfo }
+  // IAM wraps the payload: { code, msg, data: UserInfo, success }
   const wrapped = (await res.json()) as IamEnvelope<UserInfo>;
   if (wrapped.code !== 0) {
     throw new Error(`IAM user-info returned code ${wrapped.code}: ${wrapped.msg}`);

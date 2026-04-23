@@ -8,7 +8,7 @@ const providers = ref<AuthProvider[]>([]);
 
 const providerInfo: Record<string, { label: string; icon: string; color: string }> = {
   iam: {
-    label: "Sign in with IAM-staging",
+    label: "Sign in with IAM",
     icon: "OfficeBuilding",
     color: "var(--bg-brand-primary)",
   },

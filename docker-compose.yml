@@ -29,8 +29,8 @@ services:
     ports:
       - "3001:3001"
     volumes:
-      - backend_data:/app/data          # SQLite DB
-      - backend_uploads:/app/uploads    # Photo uploads
+      - backend_data:/app/data # SQLite DB
+      - backend_uploads:/app/uploads # Photo uploads
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -48,8 +48,8 @@ services:
     expose:
       - "8100"
     volumes:
-      - ai_frames:/app/frames                 # Extracted video frames
-      - ai_annotated:/app/annotated           # Bbox-annotated images
+      - ai_frames:/app/frames # Extracted video frames
+      - ai_annotated:/app/annotated # Bbox-annotated images
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -62,7 +62,7 @@ services:
     image: warehouse-assessment-frontend:latest
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "8157:80"
     depends_on:
       - backend
       - ai
