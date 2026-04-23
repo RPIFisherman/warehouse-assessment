@@ -23,14 +23,7 @@ export default defineConfig(({ mode }) => {
     .map(h => h.trim())
     .filter(Boolean)
 
-  // /api/ai goes to the Python Florence-2 sidecar; everything else to Express.
-  // Order matters — more-specific prefix MUST come first.
   const proxy = {
-    '/api/ai': {
-      target: 'http://localhost:8100',
-      rewrite: (path: string) => path.replace(/^\/api\/ai/, ''),
-      timeout: 300000,      // 5 min — video processing is slow
-    },
     '/api': 'http://localhost:3001',
     '/uploads': 'http://localhost:3001',
   }
