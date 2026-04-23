@@ -12,7 +12,6 @@ const router = createRouter({
       component: MobileShell,
       children: [
         { path: '', name: 'home', component: () => import('@/views/HomeView.vue') },
-        { path: 'ai-scan', name: 'ai-scan', component: () => import('@/views/AIAssessmentView.vue') },
         { path: 'assess/new', name: 'wizard', component: () => import('@/views/AssessmentWizard.vue') },
         { path: 'assess/:id/walk', name: 'walk', component: () => import('@/views/AssessmentWalk.vue'), props: true },
         { path: 'assess/:id/complete', name: 'complete', component: () => import('@/views/AssessmentComplete.vue'), props: true },

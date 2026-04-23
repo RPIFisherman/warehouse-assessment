@@ -7,14 +7,12 @@ const router = useRouter()
 
 const tabs = [
   { name: 'home', label: 'Assess', icon: 'Finished', path: '/' },
-  { name: 'ai-scan', label: 'AI Scan', icon: 'VideoCamera', path: '/ai-scan' },
   { name: 'issues', label: 'Issues', icon: 'Warning', path: '/issues' },
   { name: 'history', label: 'History', icon: 'Clock', path: '/history' },
   { name: 'settings', label: 'Settings', icon: 'Setting', path: '/settings' },
 ]
 
 const activeTab = computed(() => {
-  if (route.path === '/ai-scan' || route.path.startsWith('/ai-scan/')) return 'ai-scan'
   if (route.path === '/issues' || route.path.startsWith('/issues/')) return 'issues'
   if (route.path === '/history') return 'history'
   if (route.path === '/settings') return 'settings'
