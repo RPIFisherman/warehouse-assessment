@@ -112,7 +112,7 @@ export async function exchangeCodeForToken(code: string): Promise<TokenResponse>
 
   // IAM wraps token response in { code, data, msg, success } envelope
   const wrapped = (await res.json()) as IamEnvelope<TokenResponse>;
-  if (wrapped.code !== 0 || !wrapped.success) {
+  if (String(wrapped.code) !== '0') {
     throw new Error(`IAM token exchange returned code ${wrapped.code}: ${wrapped.msg}`);
   }
   return wrapped.data;
@@ -138,7 +138,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenRes
   }
 
   const wrapped = (await res.json()) as IamEnvelope<TokenResponse>;
-  if (wrapped.code !== 0 || !wrapped.success) {
+  if (String(wrapped.code) !== '0') {
     throw new Error(`IAM token refresh returned code ${wrapped.code}: ${wrapped.msg}`);
   }
   return wrapped.data;
@@ -158,7 +158,7 @@ export async function getUserInfo(accessToken: string): Promise<UserInfo> {
 
   // IAM wraps the payload: { code, msg, data: UserInfo, success }
   const wrapped = (await res.json()) as IamEnvelope<UserInfo>;
-  if (wrapped.code !== 0) {
+  if (String(wrapped.code) !== '0') {
     throw new Error(`IAM user-info returned code ${wrapped.code}: ${wrapped.msg}`);
   }
   return wrapped.data;
